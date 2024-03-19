@@ -59,33 +59,46 @@ func (r response) StringNoHeaders() string {
 	return b.String()
 }
 
-// save write a request and response output to disk
 func (r response) save(pathPrefix string, noHeaders bool) (string, error) {
+    var headersContent, bodyContent []byte
 
-	content := []byte(r.String())
-	if noHeaders {
-		content = []byte(r.StringNoHeaders())
-	}
+    // Convert headers slice to a single byte slice
+    if !noHeaders {
+        for _, header := range r.headers {
+            headersContent = append(headersContent, header...)
+            headersContent = append(headersContent, '\n')
+        }
+    }
 
-	checksum := sha1.Sum(content)
-	parts := []string{pathPrefix}
+    // Body content is already in the correct format
+    bodyContent = r.body
 
-	parts = append(parts, r.request.Hostname())
-	parts = append(parts, fmt.Sprintf("%x", checksum))
+    // Generate checksum for uniqueness
+    checksum := sha1.Sum(append(headersContent, bodyContent...))
+    parts := []string{pathPrefix, r.request.Hostname(), fmt.Sprintf("%x", checksum)}
+    basePath := path.Join(parts...)
 
-	p := path.Join(parts...)
+    // Create directory if it doesn't exist
+    if _, err := os.Stat(path.Dir(basePath)); os.IsNotExist(err) {
+        if err := os.MkdirAll(path.Dir(basePath), 0750); err != nil {
+            return basePath, err
+        }
+    }
 
-	if _, err := os.Stat(path.Dir(p)); os.IsNotExist(err) {
-		err = os.MkdirAll(path.Dir(p), 0750)
-		if err != nil {
-			return p, err
-		}
-	}
+    // Save headers to a separate file if they exist
+    headersPath := basePath + ".headers"
+    if !noHeaders {
+        if err := ioutil.WriteFile(headersPath, headersContent, 0640); err != nil {
+            return headersPath, err
+        }
+    }
 
-	err := ioutil.WriteFile(p, content, 0640)
-	if err != nil {
-		return p, err
-	}
+    // Save body to its file
+    bodyPath := basePath + ".body"
+    if err := ioutil.WriteFile(bodyPath, bodyContent, 0640); err != nil {
+        return bodyPath, err
+    }
 
-	return p, nil
+    return basePath, nil
+
 }
